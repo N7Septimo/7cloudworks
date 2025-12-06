@@ -1,62 +1,43 @@
----
-
-## `azure-pipelines.yml`
-
-This is a **minimal, working** static site pipeline for Azure App Service (Linux).  
-No fancy stuff, no templates, no conditions — just straight deployment.
-
-```yaml
 trigger:
-  branches:
-    include:
-      - main
+- main
 
 pool:
-  vmImage: 'ubuntu-latest'
+  vmImage: ubuntu-latest
 
 variables:
-  # Name of your Azure App Service (Web App)
-  webAppName: 'YOUR-WEB-APP-NAME'
-
-  # Name of the Azure Resource Manager service connection in Azure DevOps
-  azureSubscription: 'YOUR-SERVICE-CONNECTION-NAME'
-
-  # Folder containing the static website files
-  siteFolder: 'site'
+  webAppName: YOUR-WEB-APP-NAME
+  azureSubscription: YOUR-SERVICE-CONNECTION-NAME
+  siteFolder: site
 
 steps:
 - checkout: self
   displayName: 'Checkout repository'
 
-# Optional: verify site folder exists
 - script: |
     echo "Listing contents of $(siteFolder):"
     ls -la "$(siteFolder)"
   displayName: 'Inspect site folder'
 
-# Archive the static site into a zip for deployment
 - task: ArchiveFiles@2
   displayName: 'Archive static site'
   inputs:
     rootFolderOrFile: '$(siteFolder)'
     includeRootFolder: false
-    archiveType: 'zip'
+    archiveType: zip
     archiveFile: '$(Build.ArtifactStagingDirectory)/site.zip'
     replaceExistingArchive: true
 
-# Optional: publish the artifact so you can download it from Azure DevOps
 - task: PublishBuildArtifacts@1
   displayName: 'Publish build artifact'
   inputs:
     PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-    ArtifactName: 'drop'
-    publishLocation: 'Container'
+    ArtifactName: drop
+    publishLocation: Container
 
-# Deploy the zip to Azure App Service (Linux)
 - task: AzureWebApp@1
   displayName: 'Deploy to Azure Web App'
   inputs:
     azureSubscription: '$(azureSubscription)'
     appName: '$(webAppName)'
     package: '$(Build.ArtifactStagingDirectory)/site.zip'
-    appType: 'webAppLinux'
+    appType: webAppLinux
