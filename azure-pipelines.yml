@@ -1,92 +1,62 @@
+---
+
+## `azure-pipelines.yml`
+
+This is a **minimal, working** static site pipeline for Azure App Service (Linux).  
+No fancy stuff, no templates, no conditions — just straight deployment.
+
+```yaml
 trigger:
-- main
+  branches:
+    include:
+      - main
 
 pool:
-  vmImage: ubuntu-latest
+  vmImage: 'ubuntu-latest'
 
 variables:
-  CLOUDFLARE_API_TOKEN: $(CLOUDFLARE_API_TOKEN)
-  CLOUDFLARE_ACCOUNT_ID: $(CLOUDFLARE_ACCOUNT_ID)
-  CLOUDFLARE_PROJECT: 7cloudworks
-  BUILD_OUTPUT_DIR: dist
-  FLOWSIGHT_ENDPOINT: https://YOUR-FLOWSIGHT-WORKER-URL/deploy
+  # Name of your Azure App Service (Web App)
+  webAppName: 'YOUR-WEB-APP-NAME'
 
-stages:
-- stage: Build
-  displayName: Build static site
-  jobs:
-  - job: BuildSite
-    displayName: Prepare static portfolio
-    steps:
-    - checkout: self
-      displayName: Checkout repo
+  # Name of the Azure Resource Manager service connection in Azure DevOps
+  azureSubscription: 'YOUR-SERVICE-CONNECTION-NAME'
 
-    - script: |
-        echo "Creating dist directory..."
-        rm -rf "$(BUILD_OUTPUT_DIR)"
-        mkdir -p "$(BUILD_OUTPUT_DIR)"
+  # Folder containing the static website files
+  siteFolder: 'site'
 
-        echo "Copying static website files..."
-        cp -R ./* "$(BUILD_OUTPUT_DIR)"
+steps:
+- checkout: self
+  displayName: 'Checkout repository'
 
-        echo "Listing contents of dist/"
-        ls -la "$(BUILD_OUTPUT_DIR)"
-      displayName: Prepare static files
+# Optional: verify site folder exists
+- script: |
+    echo "Listing contents of $(siteFolder):"
+    ls -la "$(siteFolder)"
+  displayName: 'Inspect site folder'
 
-    - task: PublishBuildArtifacts@1
-      displayName: Publish website artifact
-      inputs:
-        pathToPublish: "$(Build.SourcesDirectory)/$(BUILD_OUTPUT_DIR)"
-        artifactName: website
-        publishLocation: Container
+# Archive the static site into a zip for deployment
+- task: ArchiveFiles@2
+  displayName: 'Archive static site'
+  inputs:
+    rootFolderOrFile: '$(siteFolder)'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/site.zip'
+    replaceExistingArchive: true
 
-- stage: Deploy
-  displayName: Deploy to Cloudflare Pages
-  dependsOn: Build
-  condition: succeeded()
-  jobs:
-  - job: DeployToCloudflare
-    displayName: Publish to Cloudflare Pages
-    steps:
-    - download: current
-      artifact: website
-      displayName: Download website artifact
+# Optional: publish the artifact so you can download it from Azure DevOps
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish build artifact'
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'drop'
+    publishLocation: 'Container'
 
-    - task: NodeTool@0
-      displayName: Install Node.js 18
-      inputs:
-        versionSpec: 18.x
-
-    - script: |
-        echo "Installing Wrangler..."
-        npm install -g wrangler
-
-        echo "Deploying site to Cloudflare Pages..."
-        wrangler pages publish "$(Pipeline.Workspace)/website" \
-          --project-name "$(CLOUDFLARE_PROJECT)" \
-          --branch main
-      displayName: Run Wrangler publish
-      env:
-        CLOUDFLARE_API_TOKEN: $(CLOUDFLARE_API_TOKEN)
-        CLOUDFLARE_ACCOUNT_ID: $(CLOUDFLARE_ACCOUNT_ID)
-
-- stage: Notify
-  displayName: Notify FlowSight Core
-  dependsOn: Deploy
-  condition: succeeded()
-  jobs:
-  - job: NotifyFlowsight
-    displayName: Send deployment metadata
-    steps:
-    - script: |
-        echo "Notifying FlowSight: $(FLOWSIGHT_ENDPOINT)"
-
-        curl -X POST "$(FLOWSIGHT_ENDPOINT)" \
-          -H "Content-Type: application/json" \
-          -d '{
-            "site": "7cloudworks.io",
-            "buildId": "$(Build.BuildId)",
-            "timestamp": "$(Build.FinishTime)",
-            "status": "success"
-          }'
-      displayName: POST metadata to FlowSight
+# Deploy the zip to Azure App Service (Linux)
+- task: AzureWebApp@1
+  displayName: 'Deploy to Azure Web App'
+  inputs:
+    azureSubscription: '$(azureSubscription)'
+    appName: '$(webAppName)'
+    package: '$(Build.ArtifactStagingDirectory)/site.zip'
+    appType: 'webAppLinux'
