@@ -1,12 +1,5 @@
 trigger:
-  branches:
-    include:
-      - main
-
-pr:
-  branches:
-    include:
-      - main
+- main
 
 pool:
   vmImage: ubuntu-latest
@@ -14,99 +7,86 @@ pool:
 variables:
   CLOUDFLARE_API_TOKEN: $(CLOUDFLARE_API_TOKEN)
   CLOUDFLARE_ACCOUNT_ID: $(CLOUDFLARE_ACCOUNT_ID)
-  CLOUDFLARE_PROJECT: "7cloudworks"
-  BUILD_OUTPUT_DIR: "dist"
-  FLOWSIGHT_ENDPOINT: "https://YOUR-FLOWSIGHT-WORKER-URL/deploy"
+  CLOUDFLARE_PROJECT: 7cloudworks
+  BUILD_OUTPUT_DIR: dist
+  FLOWSIGHT_ENDPOINT: https://YOUR-FLOWSIGHT-WORKER-URL/deploy
 
 stages:
-
-# =====================================================================
-# 1) BUILD STAGE
-# =====================================================================
 - stage: Build
-  displayName: "Build static site"
+  displayName: Build static site
   jobs:
-    - job: BuildSite
-      displayName: "Prepare static portfolio"
+  - job: BuildSite
+    displayName: Prepare static portfolio
+    steps:
+    - checkout: self
+      displayName: Checkout repo
 
-      steps:
-        - checkout: self
-          displayName: "Checkout repo"
+    - script: |
+        echo "Creating dist directory..."
+        rm -rf "$(BUILD_OUTPUT_DIR)"
+        mkdir -p "$(BUILD_OUTPUT_DIR)"
 
-        - script: |
-            echo "Creating dist directory..."
-            rm -rf "$(BUILD_OUTPUT_DIR)"
-            mkdir -p "$(BUILD_OUTPUT_DIR)"
+        echo "Copying static website files..."
+        cp -R ./* "$(BUILD_OUTPUT_DIR)"
 
-            echo "Copying static website files..."
-            cp -R ./* "$(BUILD_OUTPUT_DIR)"
+        echo "Listing contents of dist/"
+        ls -la "$(BUILD_OUTPUT_DIR)"
+      displayName: Prepare static files
 
-            echo "Listing contents of dist/"
-            ls -la "$(BUILD_OUTPUT_DIR)"
-          displayName: "Prepare static files"
+    - task: PublishBuildArtifacts@1
+      displayName: Publish website artifact
+      inputs:
+        pathToPublish: "$(Build.SourcesDirectory)/$(BUILD_OUTPUT_DIR)"
+        artifactName: website
+        publishLocation: Container
 
-        - task: PublishBuildArtifacts@1
-          displayName: "Publish website artifact"
-          inputs:
-            pathToPublish: "$(Build.SourcesDirectory)/$(BUILD_OUTPUT_DIR)"
-            artifactName: "website"
-            publishLocation: "Container"
-
-# =====================================================================
-# 2) DEPLOY STAGE
-# =====================================================================
 - stage: Deploy
-  displayName: "Deploy to Cloudflare Pages"
+  displayName: Deploy to Cloudflare Pages
   dependsOn: Build
   condition: succeeded()
-
   jobs:
-    - job: DeployToCloudflare
-      displayName: "Publish to Cloudflare Pages"
+  - job: DeployToCloudflare
+    displayName: Publish to Cloudflare Pages
+    steps:
+    - download: current
+      artifact: website
+      displayName: Download website artifact
 
-      steps:
-        - download: current
-          artifact: website
-          displayName: "Download website artifact"
+    - task: NodeTool@0
+      displayName: Install Node.js 18
+      inputs:
+        versionSpec: 18.x
 
-        - task: NodeTool@0
-          displayName: "Install Node.js 18"
-          inputs:
-            versionSpec: "18.x"
+    - script: |
+        echo "Installing Wrangler..."
+        npm install -g wrangler
 
-        - script: |
-            echo "Installing Wrangler..."
-            npm install -g wrangler
+        echo "Deploying site to Cloudflare Pages..."
+        wrangler pages publish "$(Pipeline.Workspace)/website" \
+          --project-name "$(CLOUDFLARE_PROJECT)" \
+          --branch main
+      displayName: Run Wrangler publish
+      env:
+        CLOUDFLARE_API_TOKEN: $(CLOUDFLARE_API_TOKEN)
+        CLOUDFLARE_ACCOUNT_ID: $(CLOUDFLARE_ACCOUNT_ID)
 
-            echo "Deploying site to Cloudflare Pages..."
-            wrangler pages publish "$(Pipeline.Workspace)/website" \
-              --project-name "$(CLOUDFLARE_PROJECT)" \
-              --branch main
-          displayName: "Run Wrangler publish"
-          env:
-            CLOUDFLARE_API_TOKEN: $(CLOUDFLARE_API_TOKEN)
-            CLOUDFLARE_ACCOUNT_ID: $(CLOUDFLARE_ACCOUNT_ID)
-
-# =====================================================================
-# 3) NOTIFY FLOWSIGHT
-# =====================================================================
 - stage: Notify
-  displayName: "Notify FlowSight Core"
+  displayName: Notify FlowSight Core
   dependsOn: Deploy
   condition: succeeded()
-
   jobs:
-    - job: NotifyFlowsight
-      displayName: "Send deployment metadata"
+  - job: NotifyFlowsight
+    displayName: Send deployment metadata
+    steps:
+    - script: |
+        echo "Notifying FlowSight: $(FLOWSIGHT_ENDPOINT)"
 
-      steps:
-        - script: |
-            echo "Notifying FlowSight: $(FLOWSIGHT_ENDPOINT)"
-
-            curl -X POST "$(FLOWSIGHT_ENDPOINT)" \
-              -H "Content-Type: application/json" \
-              -d "{\"site\":\"7cloudworks.io\", \
-\"buildId\":\"$(Build.BuildId)\", \
-\"timestamp\":\"$(Build.FinishTime)\", \
-\"status\":\"success\"}"
-          displayName: "POST metadata to FlowSight"
+        curl -X POST "$(FLOWSIGHT_ENDPOINT)" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "site": "7cloudworks.io",
+            "buildId": "$(Build.BuildId)",
+            "timestamp": "$(Build.FinishTime)",
+            "status": "success"
+          }'
+      displayName: POST metadata to FlowSight
